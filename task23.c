@@ -1,82 +1,131 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/resource.h>
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <thread>
 #include <unistd.h>
-#include <string.h>
+#include <sys/resource.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <cstdlib>
+#include <cstring>
 
-void test_file_limits() {
-    printf("\n[1] Testing file descriptor limits...\n");
-    
-    struct rlimit limits;
-    getrlimit(RLIMIT_NOFILE, &limits);
-    printf("Current limits: %lld (soft), %lld (hard)\n", 
-          (long long)limits.rlim_cur, (long long)limits.rlim_max);
-    
-    int fd, count = 0;
-    while ((fd = open("/dev/null", O_RDONLY)) >= 0) {
-        count++;
+void check_file_size_limit() {
+    struct rlimit limit;
+    getrlimit(RLIMIT_FSIZE, &limit);
+    std::cout << "File size limit: " << limit.rlim_cur << " bytes\n";
+
+    std::ofstream file("large_output.txt");
+    try {
+        for (int i = 0; i < 1000000; ++i) {
+            file << "This is a test line to exceed file size limit.\n";
+        }
+    } catch (...) {
+        std::cerr << "File size limit exceeded\n";
     }
-    printf("Opened %d files before error: %s\n", count, strerror(errno));
-    
-    for (int i = 3; i < count + 3; i++) close(i);
+    file.close();
 }
 
-void test_memory_limits() {
-    printf("\n[2] Testing memory allocation limits...\n");
-    
-    struct rlimit limits;
-    getrlimit(RLIMIT_DATA, &limits);
-    printf("Current limits: %lld (soft), %lld (hard)\n",
-          (long long)limits.rlim_cur, (long long)limits.rlim_max);
-    
-    size_t total = 0, block = 1024*1024; // 1MB blocks
-    while (malloc(block)) {
-        total += block;
-        if (total % (100*1024*1024) == 0) {
-            printf("Allocated %zu MB\n", total/(1024*1024));
+void check_cpu_time_limit() {
+    struct rlimit limit;
+    getrlimit(RLIMIT_CPU, &limit);
+    std::cout << "CPU time limit: " << limit.rlim_cur << " seconds\n";
+
+    while (true) {
+        volatile double x = 0;
+        for (int i = 0; i < 1000000; ++i) {
+            x += i * 0.5;
         }
     }
-    printf("Failed after allocating %zu MB: %s\n", total/(1024*1024), strerror(errno));
 }
 
-void simple_recursion(int depth) {
-    char buffer[1024]; // Use 1KB stack per call
-    if (depth % 1000 == 0) printf("Depth: %d\n", depth);
-    simple_recursion(depth + 1);
+void check_memory_limit() {
+    struct rlimit limit;
+    getrlimit(RLIMIT_AS, &limit);
+    std::cout << "Virtual memory limit: " << limit.rlim_cur << " bytes\n";
+
+    try {
+        std::vector<char*> allocations;
+        while (true) {
+            char* block = new char[1024 * 1024];
+            memset(block, 0, 1024 * 1024);
+            allocations.push_back(block);
+        }
+    } catch (...) {
+        std::cerr << "Memory allocation failed or limit reached\n";
+    }
 }
 
-void test_stack_limits() {
-    printf("\n[3] Testing stack size limits...\n");
-    
-    struct rlimit limits;
-    getrlimit(RLIMIT_STACK, &limits);
-    printf("Current limits: %lld (soft), %lld (hard)\n",
-          (long long)limits.rlim_cur, (long long)limits.rlim_max);
-    
-    printf("Starting recursive function...\n");
-    simple_recursion(0);
+void check_stack_limit() {
+    struct rlimit limit;
+    getrlimit(RLIMIT_STACK, &limit);
+    std::cout << "Stack size limit: " << limit.rlim_cur << " bytes\n";
+
+    std::function<void(int)> recurse = [&](int depth) {
+        char buffer[1024];
+        memset(buffer, depth, sizeof(buffer));
+        recurse(depth + 1);
+    };
+
+    try {
+        recurse(1);
+    } catch (...) {
+        std::cerr << "Stack overflow or limit reached\n";
+    }
+}
+
+void check_open_files_limit() {
+    struct rlimit limit;
+    getrlimit(RLIMIT_NOFILE, &limit);
+    std::cout << "Open files limit: " << limit.rlim_cur << "\n";
+
+    std::vector<std::ofstream> files;
+    try {
+        for (int i = 0; i < limit.rlim_cur + 10; ++i) {
+            std::ofstream f("temp_file_" + std::to_string(i) + ".txt");
+            files.push_back(std::move(f));
+        }
+    } catch (...) {
+        std::cerr << "Too many open files\n";
+    }
 }
 
 int main() {
-    printf("Resource Limits Tester (Simplified for FreeBSD)\n");
-    
-    while (1) {
-        printf("\nMenu:\n");
-        printf("1. Test file descriptor limits\n");
-        printf("2. Test memory allocation limits\n");
-        printf("3. Test stack size limits\n");
-        printf("0. Exit\n");
-        printf("Choose test: ");
-        
-        int choice;
-        scanf("%d", &choice);
-        
-        switch (choice) {
-            case 1: test_file_limits(); break;
-            case 2: test_memory_limits(); break;
-            case 3: test_stack_limits(); break;
-            case 0: return 0;
-            default: printf("Invalid choice!\n");
-        }
+    std::cout << "Testing resource limits...\n";
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        std::cout << "\n--- CPU Time Limit Test ---\n";
+        check_cpu_time_limit();
+        exit(0);
     }
+
+    pid = fork();
+    if (pid == 0) {
+        std::cout << "\n--- File Size Limit Test ---\n";
+        check_file_size_limit();
+        exit(0);
+    }
+
+    pid = fork();
+    if (pid == 0) {
+        std::cout << "\n--- Memory Limit Test ---\n";
+        check_memory_limit();
+        exit(0);
+    }
+
+    pid = fork();
+    if (pid == 0) {
+        std::cout << "\n--- Stack Size Limit Test ---\n";
+        check_stack_limit();
+        exit(0);
+    }
+
+    pid = fork();
+    if (pid == 0) {
+        std::cout << "\n--- Open Files Limit Test ---\n";
+        check_open_files_limit();
+        exit(0);
+    }
+
+    return 0;
 }
