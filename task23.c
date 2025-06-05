@@ -6,6 +6,9 @@
 #include <string.h>
 #include <errno.h>
 
+// Forward declaration of recursive_function
+void recursive_function(int depth, volatile int* dummy);
+
 void test_file_descriptors() {
     printf("\n=== Testing File Descriptor Limits ===\n");
     
